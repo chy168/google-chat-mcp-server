@@ -9,7 +9,10 @@ from googleapiclient.discovery import build
 from pathlib import Path
 
 # If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/chat.spaces.readonly']
+SCOPES = [
+    'https://www.googleapis.com/auth/chat.spaces.readonly',
+    'https://www.googleapis.com/auth/chat.messages'
+]
 DEFAULT_CALLBACK_URL = "http://localhost:8000/auth/callback"
 DEFAULT_TOKEN_PATH = 'token.json'
 
@@ -108,6 +111,7 @@ async def refresh_token(token_path: Optional[str] = None) -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Failed to refresh token: {str(e)}"
 
+# MCP functions
 async def list_chat_spaces() -> List[Dict]:
     """Lists all Google Chat spaces the bot has access to."""
     try:
@@ -120,3 +124,51 @@ async def list_chat_spaces() -> List[Dict]:
         return spaces.get('spaces', [])
     except Exception as e:
         raise Exception(f"Failed to list chat spaces: {str(e)}") 
+
+async def list_space_messages(space_name: str, 
+                            start_date: Optional[datetime.datetime] = None,
+                            end_date: Optional[datetime.datetime] = None) -> List[Dict]:
+    """Lists messages from a specific Google Chat space with optional time filtering.
+    
+    Args:
+        space_name: The name/identifier of the space to fetch messages from
+        start_date: Optional start datetime for filtering messages. If provided without end_date,
+                   will query messages for the entire day of start_date
+        end_date: Optional end datetime for filtering messages. Only used if start_date is also provided
+    
+    Returns:
+        List of message objects from the space matching the time criteria
+        
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    try:
+        creds = get_credentials()
+        if not creds:
+            raise Exception("No valid credentials found. Please authenticate first.")
+            
+        service = build('chat', 'v1', credentials=creds)
+        
+        # Prepare filter string based on provided dates
+        filter_str = None
+        if start_date:
+            if end_date:
+                # Format for date range query
+                filter_str = f"createTime > \"{start_date.isoformat()}\" AND createTime < \"{end_date.isoformat()}\""
+            else:
+                # For single day query, set range from start of day to end of day
+                day_start = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                day_end = day_start + datetime.timedelta(days=1)
+                filter_str = f"createTime > \"{day_start.isoformat()}\" AND createTime < \"{day_end.isoformat()}\""
+        
+        # Make API request
+        request = service.spaces().messages().list(parent=space_name)
+        if filter_str:
+            request = service.spaces().messages().list(parent=space_name, filter=filter_str)
+            
+        response = request.execute()
+        return response.get('messages', [])
+        
+    except Exception as e:
+        raise Exception(f"Failed to list messages in space: {str(e)}")
+    
