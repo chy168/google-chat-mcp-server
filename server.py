@@ -5,7 +5,8 @@ import argparse
 from typing import List, Dict
 
 from fastmcp import FastMCP
-from google_chat import list_chat_spaces, run_auth_server, DEFAULT_CALLBACK_URL, set_token_path
+from google_chat import list_chat_spaces, DEFAULT_CALLBACK_URL, set_token_path
+from server_auth import run_auth_server
 
 # Create an MCP server
 mcp = FastMCP("Demo")
