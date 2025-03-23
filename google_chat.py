@@ -19,21 +19,35 @@ from urllib.parse import urlparse
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/chat.spaces.readonly']
 DEFAULT_CALLBACK_URL = "http://localhost:8000/auth/callback"
+DEFAULT_TOKEN_PATH = 'token.json'
 
 # Store OAuth flow state and credentials
 oauth_flows = {}
 token_info = {
     'credentials': None,
-    'last_refresh': None
+    'last_refresh': None,
+    'token_path': DEFAULT_TOKEN_PATH
 }
 
-def save_credentials(creds: Credentials, token_path: str = 'token.json') -> None:
+def set_token_path(path: str) -> None:
+    """Set the global token path for OAuth storage.
+    
+    Args:
+        path: Path where the token should be stored
+    """
+    token_info['token_path'] = path
+
+def save_credentials(creds: Credentials, token_path: Optional[str] = None) -> None:
     """Save credentials to file and update in-memory cache.
     
     Args:
         creds: The credentials to save
         token_path: Path to save the token file
     """
+    # Use configured token path if none provided
+    if token_path is None:
+        token_path = token_info['token_path']
+    
     # Save to file
     token_path = Path(token_path)
     with open(token_path, 'w') as token:
@@ -47,13 +61,13 @@ def get_credentials(token_path: Optional[str] = None) -> Optional[Credentials]:
     """Gets valid user credentials from storage or memory.
     
     Args:
-        token_path: Optional path to token file. Defaults to 'token.json'
+        token_path: Optional path to token file. If None, uses the configured path.
     
     Returns:
         Credentials object or None if no valid credentials exist
     """
     if token_path is None:
-        token_path = 'token.json'
+        token_path = token_info['token_path']
     
     creds = token_info['credentials']
     
@@ -74,15 +88,18 @@ def get_credentials(token_path: Optional[str] = None) -> Optional[Credentials]:
     
     return creds if (creds and creds.valid) else None
 
-async def refresh_token(token_path: str = 'token.json') -> Tuple[bool, str]:
+async def refresh_token(token_path: Optional[str] = None) -> Tuple[bool, str]:
     """Attempt to refresh the current token.
     
     Args:
-        token_path: Path to the token file
+        token_path: Path to the token file. If None, uses the configured path.
     
     Returns:
         Tuple of (success: bool, message: str)
     """
+    if token_path is None:
+        token_path = token_info['token_path']
+        
     try:
         creds = token_info['credentials']
         if not creds:
@@ -144,9 +161,10 @@ async def start_auth(callback_url: Optional[str] = Query(None)):
             redirect_uri=callback_url or DEFAULT_CALLBACK_URL
         )
 
-        # Generate authorization URL
+        # Generate authorization URL with offline access and force approval
         auth_url, state = flow.authorization_url(
-            access_type='offline',
+            access_type='offline',  # Enable offline access
+            prompt='consent',       # Force consent screen to ensure refresh token
             include_granted_scopes='true'
         )
 
@@ -188,11 +206,22 @@ async def auth_callback(
             )
 
         try:
-            # Exchange auth code for credentials
+            # Exchange auth code for credentials with offline access
             print("fetching token: ", code)
-            flow.fetch_token(code=code)
+            flow.fetch_token(
+                code=code,
+                # Ensure we're requesting offline access for refresh tokens
+                access_type='offline'
+            )
             print("fetched credentials: ", flow.credentials)
             creds = flow.credentials
+
+            # Verify we got a refresh token
+            if not creds.refresh_token:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Failed to obtain refresh token. Please try again."
+                )
 
             # Save credentials both to file and memory
             print("saving credentials: ", creds)
@@ -204,8 +233,8 @@ async def auth_callback(
             return JSONResponse(
                 content={
                     "status": "success",
-                    "message": "Authorization successful. You can close this window.",
-                    "token_file": "token.json",
+                    "message": "Authorization successful. Long-lived token obtained. You can close this window.",
+                    "token_file": token_info['token_path'],
                     "expires_at": creds.expiry.isoformat() if creds.expiry else None,
                     "has_refresh_token": bool(creds.refresh_token)
                 }
@@ -241,12 +270,14 @@ async def manual_token_refresh():
 @app.get("/status")
 async def check_auth_status():
     """Check if we have valid credentials"""
-    token_path = Path('token.json')
-    if not token_path.exists():
+    token_path = token_info['token_path']
+    token_file = Path(token_path)
+    if not token_file.exists():
         return JSONResponse(
             content={
                 "status": "not_authenticated",
-                "message": "No authentication token found"
+                "message": "No authentication token found",
+                "token_path": str(token_path)
             }
         )
     
@@ -257,6 +288,7 @@ async def check_auth_status():
                 content={
                     "status": "authenticated",
                     "message": "Valid credentials exist",
+                    "token_path": str(token_path),
                     "expires_at": creds.expiry.isoformat() if creds.expiry else None,
                     "last_refresh": token_info['last_refresh'].isoformat() if token_info['last_refresh'] else None,
                     "has_refresh_token": bool(creds.refresh_token)
@@ -266,14 +298,16 @@ async def check_auth_status():
             return JSONResponse(
                 content={
                     "status": "expired",
-                    "message": "Credentials exist but are expired or invalid"
+                    "message": "Credentials exist but are expired or invalid",
+                    "token_path": str(token_path)
                 }
             )
     except Exception as e:
         return JSONResponse(
             content={
                 "status": "error",
-                "message": str(e)
+                "message": str(e),
+                "token_path": str(token_path)
             },
             status_code=500
         )

@@ -5,7 +5,7 @@ import argparse
 from typing import List, Dict
 
 from fastmcp import FastMCP
-from google_chat import list_chat_spaces, run_auth_server, DEFAULT_CALLBACK_URL
+from google_chat import list_chat_spaces, run_auth_server, DEFAULT_CALLBACK_URL, set_token_path
 
 # Create an MCP server
 mcp = FastMCP("Demo")
@@ -81,8 +81,12 @@ if __name__ == "__main__":
     parser.add_argument('-local-auth', action='store_true', help='Run the local authentication server')
     parser.add_argument('--host', default='localhost', help='Host to bind the server to (default: localhost)')
     parser.add_argument('--port', type=int, default=8000, help='Port to run the server on (default: 8000)')
+    parser.add_argument('--token-path', default='token.json', help='Path to store OAuth token (default: token.json)')
     
     args = parser.parse_args()
+    
+    # Set the token path for OAuth storage
+    set_token_path(args.token_path)
     
     if args.local_auth:
         print(f"\nStarting local authentication server at http://{args.host}:{args.port}")
@@ -91,6 +95,7 @@ if __name__ == "__main__":
         print("  - /status : Check authentication status")
         print("  - /auth/callback : OAuth callback endpoint")
         print(f"\nDefault callback URL: {DEFAULT_CALLBACK_URL}")
+        print(f"Token will be stored at: {args.token_path}")
         print("\nPress CTRL+C to stop the server")
         print("-" * 50)
         run_auth_server(port=args.port, host=args.host)
