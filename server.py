@@ -1,10 +1,14 @@
 # server.py
 import httpx
+import sys
+import argparse
+from typing import List, Dict
 
 from fastmcp import FastMCP
+from google_chat import list_chat_spaces, run_auth_server, DEFAULT_CALLBACK_URL
+
 # Create an MCP server
 mcp = FastMCP("Demo")
-
 
 # Add an addition tool
 @mcp.tool()
@@ -38,6 +42,15 @@ async def get_ip_my_address(city: str) -> str:
         )
         return response.text
 
+@mcp.tool()
+async def get_chat_spaces() -> List[Dict]:
+    """List all Google Chat spaces the bot has access to.
+    
+    This tool requires OAuth authentication. On first run, it will open a browser window
+    for you to log in with your Google account. Make sure you have credentials.json
+    downloaded from Google Cloud Console in the current directory.
+    """
+    return await list_chat_spaces()
 
 # @app.tool()
 # def get_ip() -> MCPResponse[Dict[str, str]]:
@@ -64,4 +77,22 @@ async def get_ip_my_address(city: str) -> str:
 #         return MCPResponse(error=str(e), status_code=500)
 
 if __name__ == "__main__":
-    mcp.run()
+    parser = argparse.ArgumentParser(description='MCP Server with Google Chat Authentication')
+    parser.add_argument('-local-auth', action='store_true', help='Run the local authentication server')
+    parser.add_argument('--host', default='localhost', help='Host to bind the server to (default: localhost)')
+    parser.add_argument('--port', type=int, default=8000, help='Port to run the server on (default: 8000)')
+    
+    args = parser.parse_args()
+    
+    if args.local_auth:
+        print(f"\nStarting local authentication server at http://{args.host}:{args.port}")
+        print("Available endpoints:")
+        print("  - /auth   : Start OAuth authentication flow")
+        print("  - /status : Check authentication status")
+        print("  - /auth/callback : OAuth callback endpoint")
+        print(f"\nDefault callback URL: {DEFAULT_CALLBACK_URL}")
+        print("\nPress CTRL+C to stop the server")
+        print("-" * 50)
+        run_auth_server(port=args.port, host=args.host)
+    else:
+        mcp.run()
