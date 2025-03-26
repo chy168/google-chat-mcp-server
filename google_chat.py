@@ -120,7 +120,7 @@ async def list_chat_spaces() -> List[Dict]:
             raise Exception("No valid credentials found. Please authenticate first.")
             
         service = build('chat', 'v1', credentials=creds)
-        spaces = service.spaces().list().execute()
+        spaces = service.spaces().list(pageSize=30).execute()
         return spaces.get('spaces', [])
     except Exception as e:
         raise Exception(f"Failed to list chat spaces: {str(e)}") 
@@ -162,11 +162,12 @@ async def list_space_messages(space_name: str,
                 filter_str = f"createTime > \"{day_start.isoformat()}\" AND createTime < \"{day_end.isoformat()}\""
         
         # Make API request
-        request = service.spaces().messages().list(parent=space_name)
+        request = service.spaces().messages().list(parent=space_name, pageSize=100)
         if filter_str:
-            request = service.spaces().messages().list(parent=space_name, filter=filter_str)
+            request = service.spaces().messages().list(parent=space_name, filter=filter_str, pageSize=100)
             
         response = request.execute()
+
         return response.get('messages', [])
         
     except Exception as e:
