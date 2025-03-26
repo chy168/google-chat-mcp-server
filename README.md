@@ -38,8 +38,8 @@ The authentication flow allows you to obtain and refresh Google API tokens, whic
 ## Prepare Google Oauth Login
 1. Clone this project
    ```
-   git clone https://github.com/chy168/mcp-google-chat-py.git
-   cd mcp-gcp-chat-py
+   git clone https://github.com/chy168/google-chat-mcp-server.git
+   cd google-chat-mcp-server
    ```
 2. Prepare a Google Cloud Project (GCP)
 3. Google Cloud Conolse (https://console.cloud.google.com/auth/overview?project=<YOUR_PROJECT_NAME>)
@@ -67,11 +67,11 @@ python server.py -local-auth --port 8000
             "command": "uv",
             "args": [
                 "--directory",
-                "/Users/chy168/mcp-google-chat-py",
+                "<YOUR_REPO_PATH>/google-chat-mcp-server",
                 "run",
                 "server.py",
                 "--token-path",
-                "/Users/chy168/mcp-google-chat-py/token.json"
+                "<YOUR_REPO_PATH>/google-chat-mcp-server/token.json"
             ]
         }
     }
