@@ -75,12 +75,14 @@ async def auth_callback(
     """Handle OAuth callback"""
     try:
         if error:
+            print(f"OAuth callback Error: {error}")
             raise HTTPException(
                 status_code=400,
                 detail=f"Authorization failed: {error}"
             )
 
         if not code:
+            print(f"Error: No authorization code received")
             raise HTTPException(
                 status_code=400,
                 detail="No authorization code received"
@@ -89,6 +91,7 @@ async def auth_callback(
         # Retrieve the flow object
         flow = oauth_flows.get(state)
         if not flow:
+            print(f"OAuth callback Error: Invalid state parameter")
             raise HTTPException(
                 status_code=400,
                 detail="Invalid state parameter"
@@ -107,11 +110,11 @@ async def auth_callback(
 
             # Verify we got a refresh token
             if not creds.refresh_token:
+                print(f"Error: No refresh token in credentials: {creds}")
                 raise HTTPException(
                     status_code=400,
                     detail="Failed to obtain refresh token. Please try again."
                 )
-
             # Save credentials both to file and memory
             print("saving credentials: ", creds)
             save_credentials(creds)
@@ -134,6 +137,7 @@ async def auth_callback(
             raise
 
     except Exception as e:
+        print(f"OAuth callback Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/auth/refresh")
