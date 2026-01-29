@@ -77,6 +77,33 @@ python server.py -local-auth --port 8000
     }
 ```
 
+## Docker / Podman
+
+### Run Container
+```bash
+# Mount your project directory containing token.json
+docker run -it --rm \
+  -v /path/to/your/project:/data \
+  google-chat-mcp-server \
+  --token-path=/data/token.json
+
+# or with podman
+podman run -it --rm \
+  -v /path/to/your/project:/data \
+  google-chat-mcp-server \
+  --token-path=/data/token.json
+```
+
+### Run Auth Server in Container
+```bash
+docker run -it --rm \
+  -p 8000:8000 \
+  -v /path/to/your/project:/data \
+  google-chat-mcp-server \
+  -local-auth --host 0.0.0.0 --port 8000 --token-path=/data/token.json
+```
+
+
 ## Tools
 The MCP server provides the following tools:
 
@@ -86,6 +113,15 @@ The MCP server provides the following tools:
 
 
 ## Development and Debug
+
+### Build Image
+```bash
+docker build -t google-chat-mcp-server .
+# or
+podman build -t google-chat-mcp-server .
+```
+
+### Debug
 ```
 fastmcp dev server.py --with-editable .
 ```

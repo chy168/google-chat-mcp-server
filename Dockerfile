@@ -9,21 +9,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy project files
-COPY . /app
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Install Poetry
-RUN pip install poetry
+# Copy dependency files first (for layer caching)
+COPY pyproject.toml uv.lock ./
 
-# Install dependencies
-RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --only main
+# Install dependencies only (cached layer)
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Copy the rest of the application
+COPY . .
+
+# Install the project
+RUN uv sync --frozen --no-dev
 
 # Expose MCP default port
 EXPOSE 8080
 
-# Set environment variables (if needed)
+# Set environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Start the MCP server (adjust if entrypoint is different)
-CMD ["python", "server.py"]
+# Start the MCP server
+ENTRYPOINT ["uv", "run", "server.py"]
