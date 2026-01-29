@@ -30,5 +30,5 @@ EXPOSE 8080
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Start the MCP server
-ENTRYPOINT ["uv", "run", "server.py"]
+# Start the MCP server (--quiet suppresses uv output to keep stdout clean for MCP stdio transport)
+ENTRYPOINT ["uv", "run", "--quiet", "server.py"]
