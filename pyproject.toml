@@ -6,9 +6,15 @@ authors = [
     {name = "Zz Chen",email = "chy168@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
-    "fastmcp (>=0.4.1,<0.5.0)"
+    "fastmcp (>=0.4.1,<0.5.0)",
+    "httpx>=0.24.0",
+    "google-auth>=2.22.0",
+    "google-auth-oauthlib>=1.0.0",
+    "google-api-python-client>=2.0.0",
+    "fastapi>=0.68.0",
+    "uvicorn>=0.15.0"
 ]
 
 [tool.poetry]

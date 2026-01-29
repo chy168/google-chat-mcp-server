@@ -31,6 +31,18 @@ def set_token_path(path: str) -> None:
     """
     token_info['token_path'] = path
 
+# Global flag for message filtering
+SAVE_TOKEN_MODE = True
+
+def set_save_token_mode(enabled: bool) -> None:
+    """Set whether to filter message fields to save tokens.
+    
+    Args:
+        enabled: True to enable filtering, False to disable
+    """
+    global SAVE_TOKEN_MODE
+    SAVE_TOKEN_MODE = enabled
+
 def save_credentials(creds: Credentials, token_path: Optional[str] = None) -> None:
     """Save credentials to file and update in-memory cache.
     
@@ -168,7 +180,22 @@ async def list_space_messages(space_name: str,
             
         response = request.execute()
 
-        return response.get('messages', [])
+        messages = response.get('messages', [])
+        
+        if not SAVE_TOKEN_MODE:
+            return messages
+
+        filtered_messages = []
+        for msg in messages:
+            filtered_msg = {
+                'sender': msg.get('sender'),
+                'createTime': msg.get('createTime'),
+                'text': msg.get('text'),
+                'thread': msg.get('thread')
+            }
+            filtered_messages.append(filtered_msg)
+
+        return filtered_messages
         
     except Exception as e:
         raise Exception(f"Failed to list messages in space: {str(e)}")
