@@ -84,13 +84,13 @@ python server.py -local-auth --port 8000
 # Mount your project directory containing token.json
 docker run -it --rm \
   -v /path/to/your/project:/data \
-  google-chat-mcp-server \
+  google-chat-mcp-server:latest \
   --token-path=/data/token.json
 
 # or with podman
 podman run -it --rm \
   -v /path/to/your/project:/data \
-  google-chat-mcp-server \
+  google-chat-mcp-server:latest \
   --token-path=/data/token.json
 ```
 
@@ -116,9 +116,9 @@ The MCP server provides the following tools:
 
 ### Build Image
 ```bash
-docker build -t google-chat-mcp-server .
+docker build -t google-chat-mcp-server:latest .
 # or
-podman build -t google-chat-mcp-server .
+podman build -t google-chat-mcp-server:latest .
 ```
 
 ### Debug
