@@ -84,13 +84,13 @@ python server.py -local-auth --port 8000
 # Mount your project directory containing token.json
 docker run -it --rm \
   -v /path/to/your/project:/data \
-  google-chat-mcp-server:latest \
+  ghcr.io/chy168/google-chat-mcp-server:latest \
   --token-path=/data/token.json
 
 # or with podman
 podman run -it --rm \
   -v /path/to/your/project:/data \
-  google-chat-mcp-server:latest \
+  ghcr.io/chy168/google-chat-mcp-server:latest \
   --token-path=/data/token.json
 ```
 
@@ -99,7 +99,7 @@ podman run -it --rm \
 docker run -it --rm \
   -p 8000:8000 \
   -v /path/to/your/project:/data \
-  google-chat-mcp-server \
+  ghcr.io/chy168/google-chat-mcp-server:latest \
   -local-auth --host 0.0.0.0 --port 8000 --token-path=/data/token.json
 ```
 
