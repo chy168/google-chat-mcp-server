@@ -29,8 +29,10 @@ The authentication flow allows you to obtain and refresh Google API tokens, whic
 
 ## Requirements
 
-- Python 3.8+
-- Google Cloud project with Chat API enabled
+- Python 3.13+
+- Google Cloud project with the following APIs enabled:
+  - Google Chat API
+  - People API (for user display names)
 - OAuth2 credentials from Google Cloud Console
 
 # How to use?
@@ -50,14 +52,30 @@ Authorized redirect URIs: `http://localhost:8000/auth/callback`
 5. After you create a OAuth 2.0 Client, download the client secrets as `.json` file. Save as `credentials.json` at top level of project.
 
 
-## Run Auth server and get your Google access token (login google only, not MCP server yet)
+## Authentication
+
+There are two authentication modes available:
+
+### Option 1: CLI Mode (Recommended for headless/remote environments)
+```bash
+uv run python server.py --auth cli
 ```
-python server.py -local-auth --port 8000
+
+This will:
+1. Display an authorization URL
+2. Open the URL in any browser (can be on another device)
+3. Complete Google authorization
+4. Copy the redirect URL from browser and paste it back to terminal
+5. Token will be saved as `token.json`
+
+### Option 2: Web Mode (For environments with local browser)
+```bash
+uv run python server.py --auth web --port 8000
 ```
 
 - Open browser at http://localhost:8000/auth
-- login it!
-- after loggined, you access token will be saved as `token.json`
+- Complete Google login
+- Token will be saved as `token.json`
 
 ## MCP Configuration (mcp.json)
 ```
@@ -96,11 +114,18 @@ podman run -it --rm \
 
 ### Run Auth Server in Container
 ```bash
+# Web mode
 docker run -it --rm \
   -p 8000:8000 \
   -v /path/to/your/project:/data \
   ghcr.io/chy168/google-chat-mcp-server:latest \
-  -local-auth --host 0.0.0.0 --port 8000 --token-path=/data/token.json
+  --auth web --host 0.0.0.0 --port 8000 --token-path=/data/token.json
+
+# CLI mode (for headless environments)
+docker run -it --rm \
+  -v /path/to/your/project:/data \
+  ghcr.io/chy168/google-chat-mcp-server:latest \
+  --auth cli --token-path=/data/token.json
 ```
 
 
