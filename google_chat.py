@@ -11,8 +11,12 @@ from pathlib import Path
 # If modifying these scopes, delete the file token.json.
 SCOPES = [
     'https://www.googleapis.com/auth/chat.spaces.readonly',
-    'https://www.googleapis.com/auth/chat.messages'
+    'https://www.googleapis.com/auth/chat.messages',
+    'https://www.googleapis.com/auth/userinfo.profile',
 ]
+
+# Cache for user display names: {user_id: display_name}
+_user_display_name_cache: Dict[str, str] = {}
 DEFAULT_CALLBACK_URL = "http://localhost:8000/auth/callback"
 DEFAULT_TOKEN_PATH = 'token.json'
 
@@ -123,6 +127,63 @@ async def refresh_token(token_path: Optional[str] = None) -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Failed to refresh token: {str(e)}"
 
+def get_user_display_name(sender: Dict, creds: Credentials) -> str:
+    """Get user display name with caching.
+
+    For HUMAN users: Uses People API to fetch display name.
+    For BOT users: Uses displayName from Chat API if available, otherwise returns bot identifier.
+
+    Args:
+        sender: The sender object from Chat API (contains 'name', 'type', optionally 'displayName')
+        creds: Valid credentials for API calls
+
+    Returns:
+        User's display name, or a fallback identifier if lookup fails
+    """
+    user_id = sender.get('name', '')
+    sender_type = sender.get('type', 'HUMAN')
+
+    # Check if already cached
+    if user_id in _user_display_name_cache:
+        return _user_display_name_cache[user_id]
+
+    # If Chat API already provided displayName, use it
+    if sender.get('displayName'):
+        _user_display_name_cache[user_id] = sender['displayName']
+        return sender['displayName']
+
+    # For BOT type, we can't use People API
+    if sender_type == 'BOT':
+        # Extract short ID for readability
+        short_id = user_id.replace('users/', '') if user_id else 'unknown'
+        display_name = f"Bot ({short_id[:8]}...)"
+        _user_display_name_cache[user_id] = display_name
+        return display_name
+
+    # For HUMAN type, try People API
+    try:
+        person_id = user_id.replace('users/', 'people/')
+
+        service = build('people', 'v1', credentials=creds)
+        person = service.people().get(
+            resourceName=person_id,
+            personFields='names'
+        ).execute()
+
+        names = person.get('names', [])
+        if names:
+            display_name = names[0].get('displayName', user_id)
+        else:
+            display_name = user_id
+
+        _user_display_name_cache[user_id] = display_name
+        return display_name
+    except Exception as e:
+        # If lookup fails, cache and return the original user_id
+        _user_display_name_cache[user_id] = user_id
+        return user_id
+
+
 # MCP functions
 async def list_chat_spaces() -> List[Dict]:
     """Lists all Google Chat spaces the bot has access to."""
@@ -181,14 +242,17 @@ async def list_space_messages(space_name: str,
         response = request.execute()
 
         messages = response.get('messages', [])
-        
+
         if not SAVE_TOKEN_MODE:
             return messages
 
         filtered_messages = []
         for msg in messages:
+            sender = msg.get('sender', {})
+            display_name = get_user_display_name(sender, creds) if sender else 'Unknown'
+
             filtered_msg = {
-                'sender': msg.get('sender'),
+                'sender': display_name,
                 'createTime': msg.get('createTime'),
                 'text': msg.get('text'),
                 'thread': msg.get('thread')
