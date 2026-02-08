@@ -234,14 +234,30 @@ async def list_space_messages(space_name: str,
                 day_end = day_start + datetime.timedelta(days=1)
                 filter_str = f"createTime > \"{day_start.isoformat()}\" AND createTime < \"{day_end.isoformat()}\""
         
-        # Make API request
-        request = service.spaces().messages().list(parent=space_name, pageSize=100)
-        if filter_str:
-            request = service.spaces().messages().list(parent=space_name, filter=filter_str, pageSize=100)
+        # Make API request with pagination
+        messages = []
+        page_token = None
+        
+        while True:
+            list_args = {
+                'parent': space_name,
+                'pageSize': 100
+            }
+            if filter_str:
+                list_args['filter'] = filter_str
+            if page_token:
+                list_args['pageToken'] = page_token
+                
+            response = service.spaces().messages().list(**list_args).execute()
             
-        response = request.execute()
-
-        messages = response.get('messages', [])
+            # Extend messages list with current page results
+            current_page_messages = response.get('messages', [])
+            if current_page_messages:
+                messages.extend(current_page_messages)
+            
+            page_token = response.get('nextPageToken')
+            if not page_token:
+                break
 
         if not SAVE_TOKEN_MODE:
             return messages
