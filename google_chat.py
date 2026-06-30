@@ -13,6 +13,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/chat.spaces.readonly',
     'https://www.googleapis.com/auth/chat.messages',
     'https://www.googleapis.com/auth/userinfo.profile',
+    'https://www.googleapis.com/auth/directory.readonly',
 ]
 
 # Cache for user display names: {user_id: display_name}

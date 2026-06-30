@@ -27,6 +27,65 @@ from google_chat import (
 )
 
 
+def _read_line_raw(prompt: str) -> str:
+    """Read a line from the terminal without TTY line-discipline buffer limits.
+
+    Switches to raw mode so pasted content of any length is captured correctly.
+    Falls back to sys.stdin.readline() when stdin is not a TTY (e.g. piped input).
+    """
+    import sys
+    print(prompt, end='', flush=True)
+
+    if not sys.stdin.isatty():
+        return sys.stdin.readline().strip()
+
+    import tty
+    import termios
+
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    chars: list = []
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch in ('\r', '\n'):
+                break
+            if ch == '\x03':  # Ctrl-C
+                raise KeyboardInterrupt
+            if ch == '\x1b':
+                # Check if this is an escape sequence (arrow keys: \x1b[A/B/C/D)
+                # or a bare ESC keypress (clear input).
+                # We peek at the next byte with a short timeout to distinguish.
+                import select
+                if select.select([sys.stdin], [], [], 0.05)[0]:
+                    sys.stdin.read(2)  # consume remaining bytes of the sequence
+                else:
+                    # Bare ESC — clear the current line, reprint the prompt.
+                    # Use only the last line of the prompt for the clear width,
+                    # since \r only moves to the start of the current line.
+                    last_prompt_line = prompt.rsplit('\n', 1)[-1]
+                    sys.stdout.write('\r' + ' ' * (len(last_prompt_line) + len(chars)) + '\r')
+                    sys.stdout.write(prompt)
+                    sys.stdout.flush()
+                    chars.clear()
+                continue
+            if ch == '\x7f':  # backspace
+                if chars:
+                    chars.pop()
+                    sys.stdout.write('\b \b')
+                    sys.stdout.flush()
+                continue
+            chars.append(ch)
+            sys.stdout.write(ch)
+            sys.stdout.flush()
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        print(f"\n({len(chars)} characters received)")
+
+    return ''.join(chars)
+
+
 def run_cli_auth(credentials_path: str = 'credentials.json'):
     """Run OAuth authentication via CLI (for headless environments)."""
 
@@ -66,33 +125,45 @@ def run_cli_auth(credentials_path: str = 'credentials.json'):
     print(f"   {auth_url}\n")
     print("2. Complete the authorization flow")
     print("3. You will be redirected to a localhost URL that may fail to load")
-    print("4. Copy the FULL URL from your browser's address bar")
-    print("   (It will look like: http://localhost:8000/auth/callback?code=...&scope=...)")
+    print("4. From the browser address bar, find the 'code=' parameter and copy its value")
+    print("   URL looks like: http://localhost:8000/auth/callback?code=<CODE>&scope=...")
+    print("   Copy only the <CODE> part (between 'code=' and the next '&')")
+    print("   Alternatively, paste the full URL — both are accepted")
     print("\n" + "=" * 60)
 
-    # Get the redirect URL from user
-    redirect_url = input("\nPaste the full redirect URL here: ").strip()
+    # Get the code or full redirect URL from user.
+    # Long redirect URLs exceed the TTY line-discipline buffer (~1 KB on macOS,
+    # ~4 KB on Linux), causing truncation with input() or readline().
+    # We switch the terminal to raw mode so characters are read one-by-one,
+    # completely bypassing that buffer.
+    import sys
+    raw = _read_line_raw("\nPaste the authorization code (or full redirect URL), then press Enter\n(Press ESC to clear and re-paste): ")
 
-    if not redirect_url:
-        print("ERROR: No URL provided.")
+    if not raw:
+        print("ERROR: No input provided.")
         return
 
     try:
-        # Extract the authorization code from the URL
         from urllib.parse import urlparse, parse_qs
-        parsed = urlparse(redirect_url)
-        params = parse_qs(parsed.query)
 
-        if 'error' in params:
-            print(f"ERROR: Authorization failed: {params['error'][0]}")
-            return
+        # Accept either a bare code or a full redirect URL
+        if raw.startswith('http'):
+            parsed = urlparse(raw)
+            params = parse_qs(parsed.query)
 
-        if 'code' not in params:
-            print("ERROR: No authorization code found in URL.")
-            print("Make sure you copied the complete URL including the ?code=... part")
-            return
+            if 'error' in params:
+                print(f"ERROR: Authorization failed: {params['error'][0]}")
+                return
 
-        code = params['code'][0]
+            if 'code' not in params:
+                print("ERROR: No authorization code found in URL.")
+                print("Make sure you copied the complete URL including the ?code=... part")
+                return
+
+            code = params['code'][0]
+        else:
+            # Treat the input as a bare authorization code
+            code = raw
 
         # Exchange the code for credentials
         print("\nExchanging authorization code for credentials...")
