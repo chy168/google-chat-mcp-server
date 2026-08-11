@@ -192,12 +192,30 @@ async def list_chat_spaces() -> List[Dict]:
         creds = get_credentials()
         if not creds:
             raise Exception("No valid credentials found. Please authenticate first.")
-            
+
         service = build('chat', 'v1', credentials=creds)
-        spaces = service.spaces().list(pageSize=30).execute()
-        return spaces.get('spaces', [])
+
+        spaces = []
+        page_token = None
+
+        while True:
+            list_args = {'pageSize': 1000}
+            if page_token:
+                list_args['pageToken'] = page_token
+
+            response = service.spaces().list(**list_args).execute()
+
+            current_page_spaces = response.get('spaces', [])
+            if current_page_spaces:
+                spaces.extend(current_page_spaces)
+
+            page_token = response.get('nextPageToken')
+            if not page_token:
+                break
+
+        return spaces
     except Exception as e:
-        raise Exception(f"Failed to list chat spaces: {str(e)}") 
+        raise Exception(f"Failed to list chat spaces: {str(e)}")
 
 async def list_space_messages(space_name: str, 
                             start_date: Optional[datetime.datetime] = None,
