@@ -12,6 +12,8 @@ from pathlib import Path
 SCOPES = [
     'https://www.googleapis.com/auth/chat.spaces.readonly',
     'https://www.googleapis.com/auth/chat.messages',
+    'https://www.googleapis.com/auth/chat.messages.reactions',
+    'https://www.googleapis.com/auth/chat.memberships.readonly',
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/directory.readonly',
 ]
@@ -299,7 +301,8 @@ async def list_space_messages(space_name: str,
     except Exception as e:
         raise Exception(f"Failed to list messages in space: {str(e)}")
 
-async def send_message(space_name: str, text: str, thread_id: Optional[str] = None) -> Dict:
+async def send_message(space_name: str, text: str, thread_id: Optional[str] = None,
+                        message_id: Optional[str] = None) -> Dict:
     """Sends a text message to a specific Google Chat space, optionally as a reply in a thread.
 
     Args:
@@ -307,6 +310,9 @@ async def send_message(space_name: str, text: str, thread_id: Optional[str] = No
         text: The message text to send
         thread_id: Optional thread identifier to reply within (e.g. 'AAAA1234' or the full
                    'spaces/.../threads/AAAA1234' name). If omitted, a new thread is started.
+        message_id: Optional custom message ID to assign (must start with 'client-', up to 63
+                    chars, lowercase letters/numbers/hyphens only, unique within the space).
+                    Lets you reference this message later without the system-assigned name.
 
     Returns:
         The created message object
@@ -329,7 +335,265 @@ async def send_message(space_name: str, text: str, thread_id: Optional[str] = No
             body['thread'] = {'name': thread_name}
             create_args['messageReplyOption'] = 'REPLY_MESSAGE_OR_FAIL'
 
+        if message_id:
+            create_args['messageId'] = message_id
+
         return service.spaces().messages().create(**create_args).execute()
     except Exception as e:
         raise Exception(f"Failed to send message to space: {str(e)}")
+
+
+def _resolve_message_name(space_name: str, message_id: str) -> str:
+    """Resolves a message resource name from either a full name or a client-assigned ID.
+
+    Args:
+        space_name: The space the message belongs to (e.g. 'spaces/AAAA1234')
+        message_id: Either a full message name ('spaces/.../messages/...') or a
+                    client-assigned ID ('client-my-id')
+
+    Returns:
+        The full message resource name
+    """
+    if message_id.startswith('spaces/'):
+        return message_id
+    return f"{space_name}/messages/{message_id}"
+
+
+async def get_message(space_name: str, message_id: str) -> Dict:
+    """Gets a single message's full details.
+
+    Args:
+        space_name: The space the message belongs to (e.g. 'spaces/AAAA1234')
+        message_id: Either the message's system-assigned ID (from its resource name,
+                    e.g. 'AAAA.BBBB') or a client-assigned ID (e.g. 'client-my-id')
+
+    Returns:
+        The message object
+
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    try:
+        creds = get_credentials()
+        if not creds:
+            raise Exception("No valid credentials found. Please authenticate first.")
+
+        service = build('chat', 'v1', credentials=creds)
+        message_name = _resolve_message_name(space_name, message_id)
+
+        return service.spaces().messages().get(name=message_name).execute()
+    except Exception as e:
+        raise Exception(f"Failed to get message: {str(e)}")
+
+
+async def update_message(space_name: str, message_id: str, text: str) -> Dict:
+    """Updates the text of an existing message that this app sent.
+
+    Args:
+        space_name: The space the message belongs to (e.g. 'spaces/AAAA1234')
+        message_id: Either the message's system-assigned ID or a client-assigned ID
+        text: The new message text
+
+    Returns:
+        The updated message object
+
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    try:
+        creds = get_credentials()
+        if not creds:
+            raise Exception("No valid credentials found. Please authenticate first.")
+
+        service = build('chat', 'v1', credentials=creds)
+        message_name = _resolve_message_name(space_name, message_id)
+
+        return service.spaces().messages().patch(
+            name=message_name,
+            updateMask='text',
+            body={'text': text}
+        ).execute()
+    except Exception as e:
+        raise Exception(f"Failed to update message: {str(e)}")
+
+
+async def delete_message(space_name: str, message_id: str) -> Dict:
+    """Deletes a message that this app sent.
+
+    Args:
+        space_name: The space the message belongs to (e.g. 'spaces/AAAA1234')
+        message_id: Either the message's system-assigned ID or a client-assigned ID
+
+    Returns:
+        An empty dict on success
+
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    try:
+        creds = get_credentials()
+        if not creds:
+            raise Exception("No valid credentials found. Please authenticate first.")
+
+        service = build('chat', 'v1', credentials=creds)
+        message_name = _resolve_message_name(space_name, message_id)
+
+        service.spaces().messages().delete(name=message_name).execute()
+        return {}
+    except Exception as e:
+        raise Exception(f"Failed to delete message: {str(e)}")
+
+
+async def search_messages(space_name: str, query: str,
+                           start_date: Optional[datetime.datetime] = None,
+                           end_date: Optional[datetime.datetime] = None) -> List[Dict]:
+    """Searches messages in a space for a keyword/substring match.
+
+    The Chat API's message list filter only supports filtering by createTime and thread,
+    not message content, so this fetches messages (optionally time-bounded) and filters
+    them client-side by a case-insensitive substring match on the message text.
+
+    Args:
+        space_name: The name/identifier of the space to search in
+        query: Case-insensitive substring to search for in message text
+        start_date: Optional start datetime to bound the search
+        end_date: Optional end datetime to bound the search
+
+    Returns:
+        List of message objects whose text contains the query
+
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    messages = await list_space_messages(space_name, start_date, end_date)
+    query_lower = query.lower()
+    return [msg for msg in messages if query_lower in (msg.get('text') or '').lower()]
+
+
+async def get_space_members(space_name: str) -> List[Dict]:
+    """Lists the members of a specific Google Chat space.
+
+    Args:
+        space_name: The name/identifier of the space (e.g. 'spaces/AAAA1234')
+
+    Returns:
+        List of membership objects for the space
+
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    try:
+        creds = get_credentials()
+        if not creds:
+            raise Exception("No valid credentials found. Please authenticate first.")
+
+        service = build('chat', 'v1', credentials=creds)
+
+        members = []
+        page_token = None
+
+        while True:
+            list_args = {'parent': space_name, 'pageSize': 1000}
+            if page_token:
+                list_args['pageToken'] = page_token
+
+            response = service.spaces().members().list(**list_args).execute()
+
+            current_page_members = response.get('memberships', [])
+            if current_page_members:
+                members.extend(current_page_members)
+
+            page_token = response.get('nextPageToken')
+            if not page_token:
+                break
+
+        return members
+    except Exception as e:
+        raise Exception(f"Failed to list space members: {str(e)}")
+
+
+async def create_reaction(space_name: str, message_id: str, emoji: str) -> Dict:
+    """Adds an emoji reaction to a message.
+
+    Args:
+        space_name: The space the message belongs to (e.g. 'spaces/AAAA1234')
+        message_id: Either the message's system-assigned ID or a client-assigned ID
+        emoji: The unicode emoji character to react with (e.g. '👍')
+
+    Returns:
+        The created reaction object
+
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    try:
+        creds = get_credentials()
+        if not creds:
+            raise Exception("No valid credentials found. Please authenticate first.")
+
+        service = build('chat', 'v1', credentials=creds)
+        message_name = _resolve_message_name(space_name, message_id)
+
+        # The reactions endpoint rejects client-assigned message IDs in the parent
+        # path (unlike get/patch/delete), so resolve to the system-assigned name first.
+        if '/messages/client-' in message_name:
+            message = service.spaces().messages().get(name=message_name).execute()
+            message_name = message['name']
+
+        return service.spaces().messages().reactions().create(
+            parent=message_name,
+            body={'emoji': {'unicode': emoji}}
+        ).execute()
+    except Exception as e:
+        raise Exception(f"Failed to create reaction: {str(e)}")
+
+
+async def list_reactions(space_name: str, message_id: str) -> List[Dict]:
+    """Lists the emoji reactions on a message.
+
+    Args:
+        space_name: The space the message belongs to (e.g. 'spaces/AAAA1234')
+        message_id: Either the message's system-assigned ID or a client-assigned ID
+
+    Returns:
+        List of reaction objects on the message
+
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    try:
+        creds = get_credentials()
+        if not creds:
+            raise Exception("No valid credentials found. Please authenticate first.")
+
+        service = build('chat', 'v1', credentials=creds)
+        message_name = _resolve_message_name(space_name, message_id)
+
+        # The reactions endpoint rejects client-assigned message IDs in the parent
+        # path (unlike get/patch/delete), so resolve to the system-assigned name first.
+        if '/messages/client-' in message_name:
+            message = service.spaces().messages().get(name=message_name).execute()
+            message_name = message['name']
+
+        reactions = []
+        page_token = None
+
+        while True:
+            list_args = {'parent': message_name, 'pageSize': 100}
+            if page_token:
+                list_args['pageToken'] = page_token
+
+            response = service.spaces().messages().reactions().list(**list_args).execute()
+
+            current_page_reactions = response.get('reactions', [])
+            if current_page_reactions:
+                reactions.extend(current_page_reactions)
+
+            page_token = response.get('nextPageToken')
+            if not page_token:
+                break
+
+        return reactions
+    except Exception as e:
+        raise Exception(f"Failed to list reactions: {str(e)}")
 
