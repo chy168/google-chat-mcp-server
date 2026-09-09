@@ -1,4 +1,8 @@
 import os
+# Google may return additional scopes previously granted (include_granted_scopes),
+# so relax the strict scope-match check oauthlib otherwise enforces.
+os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
+
 import json
 import datetime
 from typing import List, Dict, Optional, Tuple
@@ -22,6 +26,10 @@ SCOPES = [
 _user_display_name_cache: Dict[str, str] = {}
 DEFAULT_CALLBACK_URL = "http://localhost:8000/auth/callback"
 DEFAULT_TOKEN_PATH = 'token.json'
+
+# Holds the in-progress OAuth flow between a start_authentication() and
+# complete_authentication() call, since they happen as two separate tool calls.
+_pending_auth_flow: Optional[InstalledAppFlow] = None
 
 # Store credentials info
 token_info = {
@@ -596,4 +604,99 @@ async def list_reactions(space_name: str, message_id: str) -> List[Dict]:
         return reactions
     except Exception as e:
         raise Exception(f"Failed to list reactions: {str(e)}")
+
+
+def start_authentication(credentials_path: str = 'credentials.json') -> str:
+    """Starts an OAuth authentication flow and returns the authorization URL.
+
+    The user should open the URL, complete authorization, then pass the resulting
+    callback URL to complete_authentication() to finish the flow.
+
+    Args:
+        credentials_path: Path to the OAuth client credentials.json file
+
+    Returns:
+        The authorization URL for the user to open in a browser
+
+    Raises:
+        Exception: If credentials.json is missing or the flow can't be created
+    """
+    global _pending_auth_flow
+
+    creds_file = Path(credentials_path)
+    if not creds_file.exists():
+        raise Exception(
+            f"{credentials_path} not found. Download it from Google Cloud Console "
+            "and save it in the current directory."
+        )
+
+    flow = InstalledAppFlow.from_client_secrets_file(
+        str(creds_file),
+        SCOPES,
+        redirect_uri=DEFAULT_CALLBACK_URL
+    )
+
+    auth_url, _ = flow.authorization_url(
+        access_type='offline',
+        prompt='consent',
+        include_granted_scopes='true'
+    )
+
+    _pending_auth_flow = flow
+    return auth_url
+
+
+def complete_authentication(callback_url: str, token_path: Optional[str] = None) -> Dict:
+    """Completes an OAuth flow started by start_authentication() using the callback URL.
+
+    Args:
+        callback_url: The full callback URL from the browser address bar after authorizing
+                      (e.g. 'http://localhost:8000/auth/callback?code=...&scope=...'), or
+                      just the bare authorization code
+        token_path: Optional path to save the token to. If None, uses the configured path.
+
+    Returns:
+        A dict with authentication status details
+
+    Raises:
+        Exception: If no authentication flow is in progress, the callback has no code,
+                   or the code exchange fails
+    """
+    global _pending_auth_flow
+
+    if _pending_auth_flow is None:
+        raise Exception(
+            "No authentication flow in progress. Call start_authentication() first."
+        )
+
+    from urllib.parse import urlparse, parse_qs
+
+    if callback_url.startswith('http'):
+        parsed = urlparse(callback_url)
+        params = parse_qs(parsed.query)
+
+        if 'error' in params:
+            raise Exception(f"Authorization failed: {params['error'][0]}")
+
+        if 'code' not in params:
+            raise Exception("No authorization code found in the callback URL.")
+
+        code = params['code'][0]
+    else:
+        code = callback_url
+
+    try:
+        flow = _pending_auth_flow
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+
+        save_credentials(creds, token_path)
+
+        return {
+            'authenticated': True,
+            'has_refresh_token': bool(creds.refresh_token),
+            'expiry': creds.expiry.isoformat() if creds.expiry else None,
+        }
+    finally:
+        _pending_auth_flow = None
 

@@ -259,6 +259,40 @@ async def list_reactions(space_name: str, message_id: str) -> List[Dict]:
     from google_chat import list_reactions as _list_reactions
     return await _list_reactions(space_name, message_id)
 
+@mcp.tool()
+def authenticate() -> str:
+    """Start (or restart) Google Chat OAuth authentication.
+
+    Call this if another tool fails with a credentials/authentication error. It returns
+    an authorization URL - share it with the user and ask them to open it in a browser and
+    complete authorization. Once they do, call complete_authentication with the resulting
+    callback URL to finish.
+
+    Returns:
+        The authorization URL for the user to open in a browser
+    """
+    from google_chat import start_authentication
+    return start_authentication()
+
+@mcp.tool()
+def complete_authentication(callback_url: str) -> Dict:
+    """Complete an in-progress OAuth flow for Google Chat.
+
+    Call authenticate first to start the flow and get the authorization URL. After the
+    user authorizes in their browser, it redirects to a
+    'http://localhost:8000/auth/callback?code=...&scope=...' URL - that page will likely
+    fail to load, but the URL in the browser's address bar is still valid. Pass that full
+    URL here as callback_url (a bare code also works).
+
+    Args:
+        callback_url: The full callback URL from the browser address bar after authorizing
+
+    Returns:
+        A dict with authentication status details
+    """
+    from google_chat import complete_authentication as _complete_authentication
+    return _complete_authentication(callback_url)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='MCP Server with Google Chat Authentication')
     parser.add_argument('--auth', choices=['web', 'cli'],
