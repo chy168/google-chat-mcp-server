@@ -104,6 +104,31 @@ async def get_space_messages(space_name: str,
     
     return await list_space_messages(space_name, start_datetime, end_datetime)
 
+@mcp.tool()
+async def send_message(space_name: str, text: str, thread_id: str = None) -> Dict:
+    """Send a text message to a specific Google Chat space, optionally as a reply in a thread.
+
+    This tool requires OAuth authentication with the chat.messages scope. The space_name
+    should be in the format 'spaces/your_space_id'. This will post a visible message to
+    the space, so double-check the space_name, thread_id, and text before calling.
+
+    To reply within an existing thread, pass thread_id. A Google Chat message/thread URL
+    looks like 'https://chat.google.com/room/{spaceId}/{threadId}/{messageId}' - space_name
+    is 'spaces/{spaceId}' and thread_id is the {threadId} segment. If thread_id is omitted,
+    a new thread is started.
+
+    Args:
+        space_name: The name/identifier of the space to send the message to
+        text: The message text to send
+        thread_id: Optional thread identifier (the {threadId} segment from a chat.google.com
+                   message link) to reply within an existing thread instead of starting a new one
+
+    Returns:
+        The created message object
+    """
+    from google_chat import send_message as _send_message
+    return await _send_message(space_name, text, thread_id)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='MCP Server with Google Chat Authentication')
     parser.add_argument('--auth', choices=['web', 'cli'],

@@ -298,4 +298,38 @@ async def list_space_messages(space_name: str,
         
     except Exception as e:
         raise Exception(f"Failed to list messages in space: {str(e)}")
-    
+
+async def send_message(space_name: str, text: str, thread_id: Optional[str] = None) -> Dict:
+    """Sends a text message to a specific Google Chat space, optionally as a reply in a thread.
+
+    Args:
+        space_name: The name/identifier of the space to send the message to (e.g. 'spaces/AAAA1234')
+        text: The message text to send
+        thread_id: Optional thread identifier to reply within (e.g. 'AAAA1234' or the full
+                   'spaces/.../threads/AAAA1234' name). If omitted, a new thread is started.
+
+    Returns:
+        The created message object
+
+    Raises:
+        Exception: If authentication fails or API request fails
+    """
+    try:
+        creds = get_credentials()
+        if not creds:
+            raise Exception("No valid credentials found. Please authenticate first.")
+
+        service = build('chat', 'v1', credentials=creds)
+
+        body = {'text': text}
+        create_args = {'parent': space_name, 'body': body}
+
+        if thread_id:
+            thread_name = thread_id if thread_id.startswith('spaces/') else f"{space_name}/threads/{thread_id}"
+            body['thread'] = {'name': thread_name}
+            create_args['messageReplyOption'] = 'REPLY_MESSAGE_OR_FAIL'
+
+        return service.spaces().messages().create(**create_args).execute()
+    except Exception as e:
+        raise Exception(f"Failed to send message to space: {str(e)}")
+
