@@ -1,6 +1,6 @@
 import asyncio
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import google_chat
 from google_chat import extract_cards_text
@@ -86,6 +86,29 @@ class ExtractCardsTextTest(unittest.TestCase):
         rendered = extract_cards_text(REPORT_CARD_MESSAGE)
         self.assertNotIn('i.png', rendered)
         self.assertNotIn('STAR', rendered)
+
+
+class ListSpaceMessagesTest(unittest.TestCase):
+    def list_messages(self, api_messages):
+        service = MagicMock()
+        service.spaces().messages().list().execute.return_value = {'messages': api_messages}
+        with patch.object(google_chat, 'get_credentials', return_value=object()), \
+                patch.object(google_chat, 'build', return_value=service), \
+                patch.object(google_chat, 'get_user_display_name', return_value='CI bot'):
+            return asyncio.run(google_chat.list_space_messages('spaces/X'))
+
+    def test_card_message_gets_a_cards_field(self):
+        api_message = dict(CI_CARD_MESSAGE, sender={'name': 'users/1', 'type': 'BOT'},
+                           createTime='2026-01-01T00:00:00Z', thread={'name': 'spaces/X/threads/T'})
+        [msg] = self.list_messages([api_message])
+        self.assertEqual(msg['sender'], 'CI bot')
+        self.assertIsNone(msg['text'])
+        self.assertEqual(msg['cards'], extract_cards_text(CI_CARD_MESSAGE))
+
+    def test_plain_message_has_no_cards_field(self):
+        [msg] = self.list_messages([{'text': 'hello', 'sender': {'name': 'users/2'}}])
+        self.assertEqual(msg['text'], 'hello')
+        self.assertNotIn('cards', msg)
 
 
 class SearchMessagesTest(unittest.TestCase):
