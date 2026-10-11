@@ -73,7 +73,7 @@ async def get_space_messages(space_name: str,
         end_date: Optional end date in YYYY-MM-DD format
     
     Returns:
-        List of message objects from the space matching the time criteria. Messages posted as cards (bots, webhooks) carry their flattened card text in a `cards` field.
+        List of message objects from the space matching the time criteria. Messages posted as cards (bots, webhooks) carry their cards rendered as markdown in a `cards` field (headings, labelled values, links).
         
     Raises:
         ValueError: If the date format is invalid or dates are in wrong order
