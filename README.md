@@ -25,6 +25,7 @@ The authentication flow allows you to obtain and refresh Google API tokens, whic
 - OAuth2 authentication with Google Chat API
 - List available Google Chat spaces
 - Retrieve messages from specific spaces with date filtering
+- Read card messages (bots, webhooks, CI notifications) rendered as markdown
 - Local authentication server for easy setup
 
 ## Requirements
@@ -135,6 +136,16 @@ The MCP server provides the following tools:
 ### Google Chat Tools
 - `get_chat_spaces()` - List all Google Chat spaces the bot has access to
 - `get_space_messages(space_name: str, start_date: str, end_date: str = None)` - List messages from a specific Google Chat space with optional time filtering
+- `search_messages(space_name: str, query: str, start_date: str = None, end_date: str = None)` - Case-insensitive substring search in message text and card text
+
+### Card messages
+Bots and webhooks (CI, monitoring, alerting) usually post cards and leave the message `text` empty.
+Such messages get an extra `cards` field holding the cards rendered as markdown: card and section
+headers as headings, labelled values as list items, and buttons and clickable texts as links.
+
+```json
+{"sender": "CI", "text": null, "cards": "## ❌ my-pipeline #42\n\n_Build failed_\n\n- **Duration** : 11 sec\n[Open build](https://ci.example.com/42)"}
+```
 
 
 ## Development and Debug
@@ -150,4 +161,10 @@ podman build -t google-chat-mcp-server:latest .
 ```
 fastmcp dev server.py --with-editable .
 ```
+
+### Run Tests
+```bash
+uv run python -m unittest discover -s tests -t .
+```
+The same suite runs in GitHub Actions on every push and pull request (`.github/workflows/test.yml`).
 
