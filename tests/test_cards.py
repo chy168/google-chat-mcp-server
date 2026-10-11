@@ -27,11 +27,53 @@ LEGACY_CARD_MESSAGE = {
 }
 
 
+REPORT_CARD_MESSAGE = {
+    'cardsV2': [{'card': {
+        'header': {'title': 'Weekly check', 'subtitle': 'All green', 'imageUrl': 'https://example.com/i.png'},
+        'sections': [
+            {'header': 'Indicators', 'collapsible': True, 'widgets': [
+                {'decoratedText': {'topLabel': 'Total', 'text': '1 000', 'bottomLabel': 'within band',
+                                   'startIcon': {'knownIcon': 'STAR'}}},
+                {'decoratedText': {'text': 'Report', 'onClick': {'openLink': {'url': 'https://example.com/r'}}}},
+                {'textParagraph': {'text': '<i>see</i> <s>old</s> <a href="https://example.com/doc">doc</a> <font color="#f00">red</font>'}},
+            ]},
+            {'widgets': [
+                {'columns': {'columnItems': [
+                    {'widgets': [{'textParagraph': {'text': '<b>Run</b>'}}]},
+                    {'widgets': [{'textParagraph': {'text': 'r-1'}}]},
+                ]}},
+                {'divider': {}},
+                {'someFutureWidget': {'text': 'kept by fallback'}},
+            ]},
+        ],
+    }}],
+}
+
+
 class ExtractCardsTextTest(unittest.TestCase):
-    def test_flattens_cards_v2_header_widgets_and_buttons(self):
+    def test_renders_cards_v2_as_markdown(self):
         self.assertEqual(
             extract_cards_text(CI_CARD_MESSAGE),
-            '❌ my-pipeline #42\nBuild failed\nStep "deploy" failed.\nSee the logs.\nDuration\n11 sec\nOpen build',
+            '## ❌ my-pipeline #42\n\n'
+            '_Build failed_\n\n'
+            '**Step "deploy" failed.**\nSee the logs.\n'
+            '- **Duration** : 11 sec\n'
+            '[Open build](https://ci.example.com/42)',
+        )
+
+    def test_sections_labels_links_columns_and_fallback(self):
+        self.assertEqual(
+            extract_cards_text(REPORT_CARD_MESSAGE),
+            '## Weekly check\n\n'
+            '_All green_\n\n'
+            '### Indicators\n\n'
+            '- **Total** : 1 000 · _within band_\n'
+            '- [Report](https://example.com/r)\n'
+            '_see_ ~~old~~ [doc](https://example.com/doc) red\n\n'
+            '- **Run**\n'
+            '- r-1\n'
+            '---\n'
+            'kept by fallback',
         )
 
     def test_reads_legacy_cards(self):
@@ -40,8 +82,10 @@ class ExtractCardsTextTest(unittest.TestCase):
     def test_plain_text_message_has_no_card_text(self):
         self.assertIsNone(extract_cards_text({'text': 'hello'}))
 
-    def test_urls_are_not_mistaken_for_text(self):
-        self.assertNotIn('https://', extract_cards_text(CI_CARD_MESSAGE))
+    def test_icons_and_header_images_are_not_rendered(self):
+        rendered = extract_cards_text(REPORT_CARD_MESSAGE)
+        self.assertNotIn('i.png', rendered)
+        self.assertNotIn('STAR', rendered)
 
 
 class SearchMessagesTest(unittest.TestCase):
