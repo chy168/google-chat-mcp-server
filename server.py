@@ -73,7 +73,7 @@ async def get_space_messages(space_name: str,
         end_date: Optional end date in YYYY-MM-DD format
     
     Returns:
-        List of message objects from the space matching the time criteria
+        List of message objects from the space matching the time criteria. Messages posted as cards (bots, webhooks) carry their flattened card text in a `cards` field.
         
     Raises:
         ValueError: If the date format is invalid or dates are in wrong order
@@ -190,16 +190,16 @@ async def search_messages(space_name: str, query: str,
 
     The Chat API doesn't support full-text search server-side, so this fetches messages
     (optionally time-bounded, same date rules as get_space_messages) and filters them
-    for a case-insensitive substring match on the message text.
+    for a case-insensitive substring match on the message text or on the text of its cards.
 
     Args:
         space_name: The name/identifier of the space to search in
-        query: Case-insensitive substring to search for in message text
+        query: Case-insensitive substring to search for in message text or card text
         start_date: Optional start date in YYYY-MM-DD format to bound the search
         end_date: Optional end date in YYYY-MM-DD format to bound the search
 
     Returns:
-        List of message objects whose text contains the query
+        List of message objects whose text or card text contains the query
     """
     from google_chat import search_messages as _search_messages
     from datetime import datetime, timezone

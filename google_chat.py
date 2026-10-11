@@ -5,6 +5,8 @@ os.environ['OAUTHLIB_RELAX_TOKEN_SCOPE'] = '1'
 
 import json
 import datetime
+import html
+import re
 from typing import List, Dict, Optional, Tuple
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -227,7 +229,47 @@ async def list_chat_spaces() -> List[Dict]:
     except Exception as e:
         raise Exception(f"Failed to list chat spaces: {str(e)}")
 
-async def list_space_messages(space_name: str, 
+# Card fields that carry human-readable text, across cardsV2 widgets and legacy cards.
+_CARD_TEXT_KEYS = ('title', 'subtitle', 'topLabel', 'text', 'bottomLabel', 'content')
+
+
+def _strip_html(value: str) -> str:
+    """Turns the small HTML subset Chat cards allow into plain text."""
+    value = re.sub(r'<br\s*/?>', '\n', value, flags=re.IGNORECASE)
+    value = re.sub(r'<[^>]+>', '', value)
+    return html.unescape(value).strip()
+
+
+def extract_cards_text(message: Dict) -> Optional[str]:
+    """Flattens the text of a message's cards (cardsV2 and legacy cards).
+
+    Messages posted by bots and webhooks (CI, monitoring, ...) often carry their
+    whole content in cards and leave `text` empty, so without this they read as blank.
+
+    Returns:
+        The card texts joined by newlines, or None if the message has no card text.
+    """
+    parts: List[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _CARD_TEXT_KEYS and isinstance(value, str):
+                    cleaned = _strip_html(value)
+                    if cleaned:
+                        parts.append(cleaned)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(message.get('cardsV2', []))
+    walk(message.get('cards', []))
+    return '\n'.join(parts) or None
+
+
+async def list_space_messages(space_name: str,
                             start_date: Optional[datetime.datetime] = None,
                             end_date: Optional[datetime.datetime] = None) -> List[Dict]:
     """Lists messages from a specific Google Chat space with optional time filtering.
@@ -302,6 +344,9 @@ async def list_space_messages(space_name: str,
                 'text': msg.get('text'),
                 'thread': msg.get('thread')
             }
+            cards_text = extract_cards_text(msg)
+            if cards_text:
+                filtered_msg['cards'] = cards_text
             filtered_messages.append(filtered_msg)
 
         return filtered_messages
@@ -475,7 +520,11 @@ async def search_messages(space_name: str, query: str,
     """
     messages = await list_space_messages(space_name, start_date, end_date)
     query_lower = query.lower()
-    return [msg for msg in messages if query_lower in (msg.get('text') or '').lower()]
+    return [
+        msg for msg in messages
+        if query_lower in (msg.get('text') or '').lower()
+        or query_lower in (msg.get('cards') or extract_cards_text(msg) or '').lower()
+    ]
 
 
 async def get_space_members(space_name: str) -> List[Dict]:
