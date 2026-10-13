@@ -243,7 +243,7 @@ def _strip_html(value: str) -> str:
 def _html_to_markdown(value: str) -> str:
     """Turns the HTML subset Chat cards allow (b, i, s, u, font, a, br) into markdown."""
     value = re.sub(r'<br\s*/?>', '\n', value, flags=re.IGNORECASE)
-    value = re.sub(r'<a\s[^>]*href="([^"]*)"[^>]*>(.*?)</a>', r'[\2](\1)', value,
+    value = re.sub(r'<a\s[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'[\2](\1)', value,
                    flags=re.IGNORECASE | re.DOTALL)
     value = re.sub(r'</?(?:b|strong)>', '**', value, flags=re.IGNORECASE)
     value = re.sub(r'</?(?:i|em)>', '_', value, flags=re.IGNORECASE)
@@ -287,6 +287,10 @@ def _widget_to_markdown(widget: Dict) -> List[str]:
         bottom = _html_to_markdown(d.get('bottomLabel', ''))
         if bottom:
             line = f'{line} · _{bottom}_' if line else f'_{bottom}_'
+        button = d.get('button') or {}
+        button_link = _link(_strip_html(button.get('text', '')), button.get('onClick'))
+        if button_link:
+            line = f'{line} · {button_link}' if line else button_link
         return [f'- {line}'] if line else []
     if 'buttonList' in widget:
         links = [_link(_strip_html(b.get('text', '')), b.get('onClick'))
@@ -294,9 +298,11 @@ def _widget_to_markdown(widget: Dict) -> List[str]:
         links = [link for link in links if link]
         return [' · '.join(links)] if links else []
     if 'columns' in widget:
+        # Each column becomes its own list item, so a "label | value" layout spans two lines.
         lines = []
         for column in widget['columns'].get('columnItems', []):
-            cells = [line for w in column.get('widgets', []) for line in _widget_to_markdown(w)]
+            cells = [line.removeprefix('- ') for w in column.get('widgets', [])
+                     for line in _widget_to_markdown(w)]
             if cells:
                 lines.append('- ' + ' '.join(cells))
         return lines
@@ -430,7 +436,7 @@ async def list_space_messages(space_name: str,
             }
             cards_text = extract_cards_text(msg)
             if cards_text:
-                filtered_msg['cards'] = cards_text
+                filtered_msg['cards_text'] = cards_text
             filtered_messages.append(filtered_msg)
 
         return filtered_messages
@@ -607,7 +613,7 @@ async def search_messages(space_name: str, query: str,
     return [
         msg for msg in messages
         if query_lower in (msg.get('text') or '').lower()
-        or query_lower in (msg.get('cards') or extract_cards_text(msg) or '').lower()
+        or query_lower in (msg.get('cards_text') or extract_cards_text(msg) or '').lower()
     ]
 
 

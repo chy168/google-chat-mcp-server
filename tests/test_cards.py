@@ -82,6 +82,24 @@ class ExtractCardsTextTest(unittest.TestCase):
     def test_plain_text_message_has_no_card_text(self):
         self.assertIsNone(extract_cards_text({'text': 'hello'}))
 
+    def test_column_cells_get_a_single_list_prefix(self):
+        message = {'cardsV2': [{'card': {'sections': [{'widgets': [{'columns': {'columnItems': [
+            {'widgets': [{'decoratedText': {'topLabel': 'Env', 'text': 'prod'}}]},
+        ]}}]}]}}]}
+        self.assertEqual(extract_cards_text(message), '- **Env** : prod')
+
+    def test_decorated_text_button_keeps_its_link(self):
+        message = {'cardsV2': [{'card': {'sections': [{'widgets': [{'decoratedText': {
+            'text': 'Job', 'button': {'text': 'Logs', 'onClick': {'openLink': {'url': 'https://ci.example.com/42/log'}}},
+        }}]}]}}]}
+        self.assertEqual(extract_cards_text(message), '- Job · [Logs](https://ci.example.com/42/log)')
+
+    def test_single_quoted_href_keeps_its_link(self):
+        message = {'cardsV2': [{'card': {'sections': [{'widgets': [
+            {'textParagraph': {'text': "<a href='https://example.com/y'>doc</a>"}},
+        ]}]}}]}
+        self.assertEqual(extract_cards_text(message), '[doc](https://example.com/y)')
+
     def test_icons_and_header_images_are_not_rendered(self):
         rendered = extract_cards_text(REPORT_CARD_MESSAGE)
         self.assertNotIn('i.png', rendered)
@@ -97,18 +115,18 @@ class ListSpaceMessagesTest(unittest.TestCase):
                 patch.object(google_chat, 'get_user_display_name', return_value='CI bot'):
             return asyncio.run(google_chat.list_space_messages('spaces/X'))
 
-    def test_card_message_gets_a_cards_field(self):
+    def test_card_message_gets_a_cards_text_field(self):
         api_message = dict(CI_CARD_MESSAGE, sender={'name': 'users/1', 'type': 'BOT'},
                            createTime='2026-01-01T00:00:00Z', thread={'name': 'spaces/X/threads/T'})
         [msg] = self.list_messages([api_message])
         self.assertEqual(msg['sender'], 'CI bot')
         self.assertIsNone(msg['text'])
-        self.assertEqual(msg['cards'], extract_cards_text(CI_CARD_MESSAGE))
+        self.assertEqual(msg['cards_text'], extract_cards_text(CI_CARD_MESSAGE))
 
-    def test_plain_message_has_no_cards_field(self):
+    def test_plain_message_has_no_cards_text_field(self):
         [msg] = self.list_messages([{'text': 'hello', 'sender': {'name': 'users/2'}}])
         self.assertEqual(msg['text'], 'hello')
-        self.assertNotIn('cards', msg)
+        self.assertNotIn('cards_text', msg)
 
 
 class SearchMessagesTest(unittest.TestCase):
@@ -119,11 +137,15 @@ class SearchMessagesTest(unittest.TestCase):
             return asyncio.run(google_chat.search_messages('spaces/X', query))
 
     def test_matches_card_text_when_text_is_empty(self):
-        msg = {'text': None, 'cards': extract_cards_text(CI_CARD_MESSAGE)}
+        msg = {'text': None, 'cards_text': extract_cards_text(CI_CARD_MESSAGE)}
         self.assertEqual(self.search([msg], 'BUILD FAILED'), [msg])
 
     def test_matches_raw_messages_without_cards_field(self):
         self.assertEqual(self.search([CI_CARD_MESSAGE], 'deploy'), [CI_CARD_MESSAGE])
+
+    def test_matches_raw_messages_with_legacy_cards(self):
+        # With save-token mode off, messages come straight from the API, where `cards` is a list.
+        self.assertEqual(self.search([LEGACY_CARD_MESSAGE], 'ok'), [LEGACY_CARD_MESSAGE])
 
     def test_still_matches_plain_text_and_skips_misses(self):
         hit, miss = {'text': 'deploy done'}, {'text': 'unrelated'}
