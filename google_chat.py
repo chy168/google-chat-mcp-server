@@ -230,7 +230,7 @@ async def list_chat_spaces() -> List[Dict]:
         raise Exception(f"Failed to list chat spaces: {str(e)}")
 
 # Card fields that carry human-readable text, across cardsV2 widgets and legacy cards.
-_CARD_TEXT_KEYS = ('title', 'subtitle', 'topLabel', 'text', 'bottomLabel', 'content')
+_CARD_TEXT_KEYS = ('title', 'subtitle', 'topLabel', 'text', 'bottomLabel', 'content', 'label')
 
 
 def _strip_html(value: str) -> str:
@@ -245,16 +245,31 @@ def _html_to_markdown(value: str) -> str:
     value = re.sub(r'<br\s*/?>', '\n', value, flags=re.IGNORECASE)
     value = re.sub(r'<a\s[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'[\2](\1)', value,
                    flags=re.IGNORECASE | re.DOTALL)
-    value = re.sub(r'</?(?:b|strong)>', '**', value, flags=re.IGNORECASE)
-    value = re.sub(r'</?(?:i|em)>', '_', value, flags=re.IGNORECASE)
-    value = re.sub(r'</?(?:s|strike|del)>', '~~', value, flags=re.IGNORECASE)
+    # Opening tags may carry attributes (<b class="x">); both tags must map, or a stray marker is left.
+    value = re.sub(r'</?(?:b|strong)(?:\s[^>]*)?>', '**', value, flags=re.IGNORECASE)
+    value = re.sub(r'</?(?:i|em)(?:\s[^>]*)?>', '_', value, flags=re.IGNORECASE)
+    value = re.sub(r'</?(?:s|strike|del)(?:\s[^>]*)?>', '~~', value, flags=re.IGNORECASE)
     value = re.sub(r'<[^>]+>', '', value)  # u, font and anything else: keep the text
     return html.unescape(value).strip()
 
 
+def _url(on_click: Optional[Dict]) -> Optional[str]:
+    return ((on_click or {}).get('openLink') or {}).get('url')
+
+
 def _link(text: str, on_click: Optional[Dict]) -> str:
-    url = ((on_click or {}).get('openLink') or {}).get('url')
+    url = _url(on_click)
     return f'[{text}]({url})' if url and text else text
+
+
+def _button_link(button: Dict) -> str:
+    """A button or chip as a link. Icon-only buttons fall back to their alt text, then to the URL."""
+    text = (_strip_html(button.get('text') or button.get('label') or '')
+            or button.get('altText') or (button.get('icon') or {}).get('altText') or '')
+    url = _url(button.get('onClick'))
+    if not text:
+        return f'<{url}>' if url else ''
+    return _link(text, button.get('onClick'))
 
 
 def _generic_text(node) -> List[str]:
@@ -281,21 +296,24 @@ def _widget_to_markdown(widget: Dict) -> List[str]:
         return [text] if text else []
     if 'decoratedText' in widget:
         d = widget['decoratedText']
-        text = _link(_html_to_markdown(d.get('text', '')), d.get('onClick'))
+        text = _html_to_markdown(d.get('text', ''))
+        url = _url(d.get('onClick'))
+        if url and text and '](' in text:
+            text = f'{text} · <{url}>'  # wrapping a text that already holds a link would nest links
+        else:
+            text = _link(text, d.get('onClick'))
         label = _html_to_markdown(d.get('topLabel', ''))
         line = f'**{label}** : {text}' if label and text else (label or text)
         bottom = _html_to_markdown(d.get('bottomLabel', ''))
         if bottom:
             line = f'{line} · _{bottom}_' if line else f'_{bottom}_'
-        button = d.get('button') or {}
-        button_link = _link(_strip_html(button.get('text', '')), button.get('onClick'))
+        button_link = _button_link(d.get('button') or {})
         if button_link:
             line = f'{line} · {button_link}' if line else button_link
         return [f'- {line}'] if line else []
-    if 'buttonList' in widget:
-        links = [_link(_strip_html(b.get('text', '')), b.get('onClick'))
-                 for b in widget['buttonList'].get('buttons', [])]
-        links = [link for link in links if link]
+    if 'buttonList' in widget or 'chipList' in widget:
+        items = (widget.get('buttonList') or {}).get('buttons') or (widget.get('chipList') or {}).get('chips') or []
+        links = [link for link in map(_button_link, items) if link]
         return [' · '.join(links)] if links else []
     if 'columns' in widget:
         # Each column becomes its own list item, so a "label | value" layout spans two lines.
@@ -315,7 +333,8 @@ def _widget_to_markdown(widget: Dict) -> List[str]:
                 lines.append(f'- {text}')
         return lines
     if 'divider' in widget:
-        return ['---']
+        # Blank lines around the rule, or the line above it would read as a setext heading.
+        return ['', '---', '']
     if 'image' in widget:
         image = widget['image']
         return [f"![{image.get('altText', '')}]({image['imageUrl']})"] if image.get('imageUrl') else []
@@ -333,9 +352,38 @@ def _card_to_markdown(card: Dict) -> List[str]:
         if section.get('header'):
             blocks.append(f"### {_strip_html(section['header'])}")
         lines = [line for w in section.get('widgets', []) for line in _widget_to_markdown(w)]
-        if lines:
-            blocks.append('\n'.join(lines))
+        block = re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip('\n')
+        if block:
+            blocks.append(block)
     return blocks
+
+
+def _legacy_widget(widget: Dict) -> Dict:
+    """Maps a legacy `cards` widget onto its cardsV2 equivalent, so both render the same way."""
+    def button(b: Dict) -> Dict:
+        if 'textButton' in b:
+            return {'text': b['textButton'].get('text', ''), 'onClick': b['textButton'].get('onClick')}
+        image = b.get('imageButton') or {}
+        return {'altText': image.get('name', ''), 'onClick': image.get('onClick')}
+
+    if 'keyValue' in widget:
+        kv = widget['keyValue']
+        decorated = {'topLabel': kv.get('topLabel', ''), 'text': kv.get('content', ''),
+                     'bottomLabel': kv.get('bottomLabel', ''), 'onClick': kv.get('onClick')}
+        if kv.get('button'):
+            decorated['button'] = button(kv['button'])
+        return {'decoratedText': decorated}
+    if 'buttons' in widget:
+        return {'buttonList': {'buttons': [button(b) for b in widget['buttons']]}}
+    return widget  # textParagraph and image share the cardsV2 shape
+
+
+def _legacy_card(card: Dict) -> Dict:
+    return {
+        'header': card.get('header') or {},
+        'sections': [dict(section, widgets=[_legacy_widget(w) for w in section.get('widgets', [])])
+                     for section in card.get('sections', [])],
+    }
 
 
 def extract_cards_text(message: Dict) -> Optional[str]:
@@ -353,10 +401,14 @@ def extract_cards_text(message: Dict) -> Optional[str]:
     for entry in message.get('cardsV2', []):
         blocks.extend(_card_to_markdown(entry.get('card') or {}))
     for legacy in message.get('cards', []):
-        text = '\n'.join(_generic_text(legacy))
-        if text:
-            blocks.append(text)
+        blocks.extend(_card_to_markdown(_legacy_card(legacy)))
     return '\n\n'.join(blocks) or None
+
+
+def _cards_search_text(message: Dict) -> str:
+    """The cards' text without the markdown the renderer adds, so a search can span formatting."""
+    cards = message.get('cardsV2', []) + message.get('cards', [])
+    return ' '.join(' '.join(_generic_text(cards)).split())
 
 
 async def list_space_messages(space_name: str,
@@ -376,6 +428,14 @@ async def list_space_messages(space_name: str,
     Raises:
         Exception: If authentication fails or API request fails
     """
+    messages, creds = await _fetch_space_messages(space_name, start_date, end_date)
+    return _present_messages(messages, creds)
+
+
+async def _fetch_space_messages(space_name: str,
+                                start_date: Optional[datetime.datetime] = None,
+                                end_date: Optional[datetime.datetime] = None) -> Tuple[List[Dict], Credentials]:
+    """Fetches the raw API messages of a space, with the credentials used to fetch them."""
     try:
         creds = get_credentials()
         if not creds:
@@ -420,29 +480,42 @@ async def list_space_messages(space_name: str,
             if not page_token:
                 break
 
-        if not SAVE_TOKEN_MODE:
-            return messages
+        return messages, creds
 
-        filtered_messages = []
-        for msg in messages:
-            sender = msg.get('sender', {})
-            display_name = get_user_display_name(sender, creds) if sender else 'Unknown'
-
-            filtered_msg = {
-                'sender': display_name,
-                'createTime': msg.get('createTime'),
-                'text': msg.get('text'),
-                'thread': msg.get('thread')
-            }
-            cards_text = extract_cards_text(msg)
-            if cards_text:
-                filtered_msg['cards_text'] = cards_text
-            filtered_messages.append(filtered_msg)
-
-        return filtered_messages
-        
     except Exception as e:
         raise Exception(f"Failed to list messages in space: {str(e)}")
+
+
+def _present_messages(messages: List[Dict], creds: Credentials) -> List[Dict]:
+    """Shapes raw API messages for the tools: trimmed in save-token mode, raw otherwise.
+
+    Either way, a message with cards gets a `cards_text` field holding them as markdown.
+    """
+    if not SAVE_TOKEN_MODE:
+        presented = []
+        for msg in messages:
+            cards_text = extract_cards_text(msg)
+            presented.append(dict(msg, cards_text=cards_text) if cards_text else msg)
+        return presented
+
+    filtered_messages = []
+    for msg in messages:
+        sender = msg.get('sender', {})
+        display_name = get_user_display_name(sender, creds) if sender else 'Unknown'
+
+        filtered_msg = {
+            'sender': display_name,
+            'createTime': msg.get('createTime'),
+            'text': msg.get('text'),
+            'thread': msg.get('thread')
+        }
+        cards_text = extract_cards_text(msg)
+        if cards_text:
+            filtered_msg['cards_text'] = cards_text
+        filtered_messages.append(filtered_msg)
+
+    return filtered_messages
+
 
 async def send_message(space_name: str, text: str, thread_id: Optional[str] = None,
                         message_id: Optional[str] = None) -> Dict:
@@ -594,27 +667,30 @@ async def search_messages(space_name: str, query: str,
 
     The Chat API's message list filter only supports filtering by createTime and thread,
     not message content, so this fetches messages (optionally time-bounded) and filters
-    them client-side by a case-insensitive substring match on the message text.
+    them client-side by a case-insensitive substring match on the message text or the
+    text of its cards.
 
     Args:
         space_name: The name/identifier of the space to search in
-        query: Case-insensitive substring to search for in message text
+        query: Case-insensitive substring to search for in message text or card text
         start_date: Optional start datetime to bound the search
         end_date: Optional end datetime to bound the search
 
     Returns:
-        List of message objects whose text contains the query
+        List of message objects whose text or card text contains the query
 
     Raises:
         Exception: If authentication fails or API request fails
     """
-    messages = await list_space_messages(space_name, start_date, end_date)
+    messages, creds = await _fetch_space_messages(space_name, start_date, end_date)
     query_lower = query.lower()
-    return [
+    hits = [
         msg for msg in messages
         if query_lower in (msg.get('text') or '').lower()
-        or query_lower in (msg.get('cards_text') or extract_cards_text(msg) or '').lower()
+        or query_lower in _cards_search_text(msg).lower()
+        or query_lower in (extract_cards_text(msg) or '').lower()  # link URLs live only here
     ]
+    return _present_messages(hits, creds)
 
 
 async def get_space_members(space_name: str) -> List[Dict]:
