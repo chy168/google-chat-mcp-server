@@ -140,11 +140,11 @@ The MCP server provides the following tools:
 
 ### Card messages
 Bots and webhooks (CI, monitoring, alerting) usually post cards and leave the message `text` empty.
-Such messages get an extra `cards` field holding the cards rendered as markdown: card and section
+Such messages get an extra `cards_text` field holding the cards rendered as markdown: card and section
 headers as headings, labelled values as list items, and buttons and clickable texts as links.
 
 ```json
-{"sender": "CI", "text": null, "cards": "## ❌ my-pipeline #42\n\n_Build failed_\n\n- **Duration** : 11 sec\n[Open build](https://ci.example.com/42)"}
+{"sender": "CI", "text": null, "cards_text": "## ❌ my-pipeline #42\n\n_Build failed_\n\n- **Duration** : 11 sec\n[Open build](https://ci.example.com/42)"}
 ```
 
 
